@@ -92,6 +92,20 @@ class ApiEtablissementsTestCase(TestCase):
         data = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(data["features"], [])
+    def test_sans_page_comportement_inchange(self):
+        """Sans le paramètre 'page', la réponse doit rester identique à avant (rétrocompatibilité)."""
+        response = self.client.get("/api/etablissements/")
+        data = response.json()
+        self.assertNotIn("pagination", data)
+        self.assertEqual(len(data["features"]), 2)
+
+    def test_avec_pagination(self):
+        """Avec page_size=1, chaque page ne doit contenir qu'un seul établissement."""
+        response = self.client.get("/api/etablissements/?page=1&page_size=1")
+        data = response.json()
+        self.assertEqual(len(data["features"]), 1)
+        self.assertEqual(data["pagination"]["total_resultats"], 2)
+        self.assertTrue(data["pagination"]["page_suivante"])
 
 
 class ApiEtablissementProcheTestCase(TestCase):
@@ -131,3 +145,10 @@ class ApiEtablissementProcheTestCase(TestCase):
         """lat='abc' doit être détecté et renvoyer 400, pas un crash serveur 500."""
         response = self.client.get("/api/etablissement-proche/?lat=abc&lon=-17.44")
         self.assertEqual(response.status_code, 400)
+    def test_quartiers_nb_etablissements_correct(self):
+        """Le comptage via annotate doit donner le même résultat qu'un comptage manuel."""
+        response = self.client.get("/api/quartiers/")
+        data = response.json()
+        feature = data["features"][0]
+        self.assertEqual(feature["properties"]["nom"], "Camberene")
+        self.assertEqual(feature["properties"]["nb_etablissements"], 2)

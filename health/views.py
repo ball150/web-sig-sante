@@ -8,6 +8,9 @@ from .models import EtablissementSante
 from django.db.models import Q
 
 
+from django.core.paginator import Paginator
+
+
 def etablissements_geojson(request):
     etablissements = EtablissementSante.objects.select_related(
         "id_type", "id_quartier", "id_secteur"
@@ -17,6 +20,8 @@ def etablissements_geojson(request):
     quartier_param = request.GET.get("quartier")
     secteur_param = request.GET.get("secteur")
     search_param = request.GET.get("search")
+    page_param = request.GET.get("page")
+    page_size_param = request.GET.get("page_size", 20)
 
     if type_param:
         etablissements = etablissements.filter(id_type__libelle_type__icontains=type_param)
@@ -31,6 +36,31 @@ def etablissements_geojson(request):
         etablissements = etablissements.filter(
             Q(nom__icontains=search_param) | Q(adresse__icontains=search_param)
         )
+
+    pagination_info = None
+    if page_param:
+        try:
+            page_size = int(page_size_param)
+        except ValueError:
+            page_size = 20
+
+        paginator = Paginator(etablissements, page_size)
+        try:
+            page_number = int(page_param)
+        except ValueError:
+            page_number = 1
+
+        page_obj = paginator.get_page(page_number)
+        etablissements = page_obj.object_list
+
+        pagination_info = {
+            "page": page_obj.number,
+            "page_size": page_size,
+            "total_pages": paginator.num_pages,
+            "total_resultats": paginator.count,
+            "page_suivante": page_obj.has_next(),
+            "page_precedente": page_obj.has_previous(),
+        }
 
     features = []
     for e in etablissements:
@@ -48,16 +78,24 @@ def etablissements_geojson(request):
             },
         })
 
-    return JsonResponse({
-        "type": "FeatureCollection",
-        "features": features,
-    })
+    response_data = {"type": "FeatureCollection", "features": features}
+    if pagination_info:
+        response_data["pagination"] = pagination_info
+
+    return JsonResponse(response_data)
 
 from .models import EtablissementSante, Quartier, Commune
 
 
+from django.db.models import Count
+
+
 def quartiers_geojson(request):
-    quartiers = Quartier.objects.select_related("id_commune")
+    quartiers = (
+        Quartier.objects
+        .select_related("id_commune")
+        .annotate(nb_etablissements=Count("etablissements"))
+    )
 
     features = []
     for q in quartiers:
@@ -68,7 +106,7 @@ def quartiers_geojson(request):
                 "id": q.id_quartier,
                 "nom": q.nom,
                 "commune": q.id_commune.nom,
-                "nb_etablissements": q.etablissements.count(),
+                "nb_etablissements": q.nb_etablissements,
             },
         })
 
@@ -267,3 +305,20 @@ def accessibilite(request):
         ),
         "quartiers": resultats,
     })
+from .models import TypeEtablissement, Secteur
+
+
+def types_etablissements_json(request):
+    data = list(TypeEtablissement.objects.values("id_type", "libelle_type"))
+    return JsonResponse({"types": data})
+
+
+def secteurs_json(request):
+    data = list(Secteur.objects.values("id_secteur", "libelle"))
+    return JsonResponse({"secteurs": data})
+
+
+def export_etablissements(request):
+    response = etablissements_geojson(request)
+    response["Content-Disposition"] = 'attachment; filename="etablissements_export.geojson"'
+    return response
