@@ -152,3 +152,19 @@ class ApiEtablissementProcheTestCase(TestCase):
         feature = data["features"][0]
         self.assertEqual(feature["properties"]["nom"], "Camberene")
         self.assertEqual(feature["properties"]["nb_etablissements"], 2)
+class ApiItineraireTestCase(TestCase):
+    """Vérifie la gestion des erreurs sur les endpoints d'itinéraire (le calcul réel dépend
+    de troncon_route_clean, qui n'existe pas dans la base de test isolée — on teste donc
+    la robustesse de l'API, pas le calcul pgRouting lui-même)."""
+
+    def test_parametres_manquants_etablissements(self):
+        response = self.client.get("/api/itineraire/etablissements/")
+        self.assertEqual(response.status_code, 400)
+
+    def test_etablissement_introuvable(self):
+        response = self.client.get("/api/itineraire/etablissements/?id1=1&id2=99999")
+        self.assertEqual(response.status_code, 404)
+
+    def test_parametres_manquants_position(self):
+        response = self.client.get("/api/itineraire/")
+        self.assertEqual(response.status_code, 400)

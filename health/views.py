@@ -322,3 +322,123 @@ def export_etablissements(request):
     response = etablissements_geojson(request)
     response["Content-Disposition"] = 'attachment; filename="etablissements_export.geojson"'
     return response
+
+from django.db import connection
+
+
+def _noeud_le_plus_proche(point_wkt):
+    """Trouve le nœud du graphe de routage le plus proche d'un point (WKT)."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT id FROM troncon_route_vertices
+            ORDER BY geom <-> ST_SetSRID(ST_GeomFromText(%s), 4326)
+            LIMIT 1
+            """,
+            [point_wkt],
+        )
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+
+def _calculer_itineraire(noeud_depart, noeud_arrivee):
+    """Exécute pgr_dijkstra et renvoie (liste_geometries_ordonnee, distance_totale_m) ou (None, None)."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT dj.seq, dj.agg_cost, t.geom
+            FROM pgr_dijkstra(
+                'SELECT id, source, target, cost FROM troncon_route_clean',
+                %s, %s, directed => false
+            ) AS dj
+            LEFT JOIN troncon_route_clean t ON t.id = dj.edge
+            ORDER BY dj.seq
+            """,
+            [noeud_depart, noeud_arrivee],
+        )
+        rows = cursor.fetchall()
+
+    if not rows:
+        return None, None
+
+    distance_totale = rows[-1][1]
+    geometries = [GEOSGeometry(geom_wkb) for _, _, geom_wkb in rows if geom_wkb is not None]
+    return geometries, distance_totale
+
+
+def _reponse_itineraire(geometries, distance_totale, properties_extra):
+    from django.contrib.gis.geos import MultiLineString
+
+    trace = MultiLineString(geometries)
+    return JsonResponse({
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "geometry": json.loads(trace.geojson),
+            "properties": {
+                "distance_m": round(distance_totale, 1),
+                **properties_extra,
+            },
+        }],
+    })
+
+
+def itineraire_etablissements(request):
+    id1 = request.GET.get("id1")
+    id2 = request.GET.get("id2")
+
+    if not id1 or not id2:
+        return JsonResponse({"error": "Paramètres 'id1' et 'id2' requis."}, status=400)
+
+    try:
+        e1 = EtablissementSante.objects.get(id_etablissement=id1)
+        e2 = EtablissementSante.objects.get(id_etablissement=id2)
+    except EtablissementSante.DoesNotExist:
+        return JsonResponse({"error": "Établissement introuvable."}, status=404)
+
+    noeud1 = _noeud_le_plus_proche(e1.geom.wkt)
+    noeud2 = _noeud_le_plus_proche(e2.geom.wkt)
+
+    geometries, distance = _calculer_itineraire(noeud1, noeud2)
+    if geometries is None:
+        return JsonResponse({
+            "error": "Aucun itinéraire trouvé entre ces deux établissements (routes non connectées dans les données)."
+        }, status=404)
+
+    return _reponse_itineraire(geometries, distance, {
+        "depart": e1.nom, "arrivee": e2.nom,
+    })
+
+from django.contrib.gis.geos import GEOSGeometry, Point, MultiLineString
+def itineraire_depuis_position(request):
+    lat = request.GET.get("lat")
+    lon = request.GET.get("lon")
+    etablissement_id = request.GET.get("id")
+
+    if not lat or not lon or not etablissement_id:
+        return JsonResponse({"error": "Paramètres 'lat', 'lon' et 'id' requis."}, status=400)
+
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except ValueError:
+        return JsonResponse({"error": "'lat' et 'lon' doivent être des nombres."}, status=400)
+
+    try:
+        etablissement = EtablissementSante.objects.get(id_etablissement=etablissement_id)
+    except EtablissementSante.DoesNotExist:
+        return JsonResponse({"error": "Établissement introuvable."}, status=404)
+
+    position = Point(lon, lat, srid=4326)
+    noeud_depart = _noeud_le_plus_proche(position.wkt)
+    noeud_arrivee = _noeud_le_plus_proche(etablissement.geom.wkt)
+
+    geometries, distance = _calculer_itineraire(noeud_depart, noeud_arrivee)
+    if geometries is None:
+        return JsonResponse({
+            "error": "Aucun itinéraire trouvé vers cet établissement (routes non connectées dans les données)."
+        }, status=404)
+
+    return _reponse_itineraire(geometries, distance, {
+        "arrivee": etablissement.nom,
+    })
