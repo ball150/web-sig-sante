@@ -1,0 +1,43 @@
+{% extends "health/base.html" %}
+{% load static %}
+
+{% block title %}
+Quartiers - Carte Sanitaire
+{% endblock %}
+
+{% block content %}
+
+<div class="page-container">
+
+    <div class="page-header">
+        {% include "health/_bg_slideshow.html" %}
+        {% include "health/_decor.html" %}
+        <h1>Quartiers</h1>
+        <p>Répartition des établissements et indicateur d'accessibilité par quartier.</p>
+    </div>
+
+    <div class="alert-banner" id="avertissement-banner"></div>
+
+    <div class="table-wrapper">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Quartier</th>
+                    <th>Établissements</th>
+                    <th>Population</th>
+                    <th>Habitants / établissement</th>
+                </tr>
+            </thead>
+            <tbody id="quartiers-table-body">
+                <tr><td colspan="4" class="loading-row">Chargement des données...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'health/js/quartiers.js' %}?v=6"></script>
+{% endblock %}
