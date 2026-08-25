@@ -1,0 +1,12 @@
+{% load static %}
+{% comment %}
+Diaporama de fond en 3 images, avec fondu-enchaîné en boucle (CSS pur,
+aucun JS nécessaire). Le calque semi-transparent vert par-dessus garantit
+la lisibilité du texte quelle que soit l'image affichée à un instant donné.
+{% endcomment %}
+<div class="bg-slideshow" aria-hidden="true">
+    <div class="bg-slide bg-slide-1" style="background-image: url('{% static 'health/images/sante1.jpg' %}')"></div>
+    <div class="bg-slide bg-slide-2" style="background-image: url('{% static 'health/images/sante2.jpg' %}')"></div>
+    <div class="bg-slide bg-slide-3" style="background-image: url('{% static 'health/images/sante3.jpg' %}')"></div>
+    <div class="bg-overlay"></div>
+</div>

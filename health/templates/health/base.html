@@ -1,0 +1,142 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        {% block title %}Carte Sanitaire{% endblock %}
+    </title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <link
+        rel="stylesheet"
+        href="{% static 'health/css/style.css' %}?v=6"
+    >
+
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    >
+
+    {% block extra_css %}{% endblock %}
+
+</head>
+
+<body>
+
+    <!-- NAVBAR (fixe) -->
+    <header class="navbar" id="navbar">
+
+        <a href="{% url 'accueil' %}" class="logo">
+            <img src="{% static 'health/images/logo-geosante.png' %}" alt="GéoSanté" class="logo-img">
+            <span class="logo-text">Carte Sanitaire</span>
+        </a>
+
+        <button class="nav-toggle" id="nav-toggle" aria-label="Ouvrir le menu" aria-expanded="false">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
+
+        <nav id="main-nav">
+            <a href="{% url 'accueil' %}" {% if request.resolver_match.url_name == 'accueil' %}class="active"{% endif %}>Accueil</a>
+            <a href="{% url 'carte' %}" {% if request.resolver_match.url_name == 'carte' %}class="active"{% endif %}>Carte</a>
+            <a href="{% url 'etablissements' %}" {% if request.resolver_match.url_name == 'etablissements' %}class="active"{% endif %}>Établissements</a>
+            <a href="{% url 'quartiers' %}" {% if request.resolver_match.url_name == 'quartiers' %}class="active"{% endif %}>Quartiers</a>
+            <a href="{% url 'statistiques' %}" {% if request.resolver_match.url_name == 'statistiques' %}class="active"{% endif %}>Statistiques</a>
+        </nav>
+
+    </header>
+
+
+    <!-- CONTENU DES PAGES -->
+
+    <main>
+        {% block content %}
+        {% endblock %}
+    </main>
+
+
+    <!-- FOOTER -->
+
+    <footer class="site-footer">
+
+        <div class="footer-grid">
+
+            <div class="footer-col footer-brand">
+                <img src="{% static 'health/images/logo-geosante.png' %}" alt="GéoSanté" class="footer-logo-img">
+                <p>
+                    Application WebSIG développée dans le cadre du module
+                    Systèmes d'Information Géographique / Développement WebSIG
+                    avec Django — Licence 3 Géomatique.
+                </p>
+                <p class="footer-tagline">
+                    Cartographier la santé, faciliter l'accès aux soins.
+                </p>
+            </div>
+
+            <div class="footer-col">
+                <h4>Navigation</h4>
+                <ul>
+                    <li><a href="{% url 'accueil' %}">Accueil</a></li>
+                    <li><a href="{% url 'carte' %}">Carte interactive</a></li>
+                    <li><a href="{% url 'etablissements' %}">Établissements</a></li>
+                    <li><a href="{% url 'quartiers' %}">Quartiers</a></li>
+                    <li><a href="{% url 'statistiques' %}">Statistiques</a></li>
+                </ul>
+            </div>
+
+            <div class="footer-col">
+                <h4>Fonctionnalités</h4>
+                <ul>
+                    <li>Recherche et filtres avancés</li>
+                    <li>Symbologie par type d'établissement</li>
+                    <li>Zone de desserte (🚶 / 🚗)</li>
+                    <li>Export de données GeoJSON</li>
+                    <li>Tableau de bord statistique</li>
+                </ul>
+            </div>
+
+            <div class="footer-col">
+                <h4>Technologies</h4>
+                <ul class="tech-list">
+                    <li>Django &amp; GeoDjango</li>
+                    <li>PostgreSQL / PostGIS</li>
+                    <li>Leaflet.js</li>
+                    <li>Chart.js</li>
+                </ul>
+            </div>
+
+        </div>
+
+        <div class="footer-bottom">
+            <p>© 2026 WebSIG Santé — Projet académique, Licence 3 Géomatique</p>
+            <p class="footer-bottom-secondary">Réalisé avec Django &amp; GeoDjango — Non destiné à un usage médical officiel</p>
+        </div>
+
+    </footer>
+
+    <!-- Bouton retour en haut -->
+    <button id="back-to-top" aria-label="Retour en haut">↑</button>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script src="{% static 'health/js/main.js' %}?v=6"></script>
+
+    {% block extra_js %}{% endblock %}
+
+</body>
+
+</html>

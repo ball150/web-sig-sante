@@ -1,0 +1,65 @@
+{% extends "health/base.html" %}
+{% load static %}
+
+{% block title %}
+Établissements - Carte Sanitaire
+{% endblock %}
+
+{% block content %}
+
+<div class="page-container">
+
+    <div class="page-header">
+        {% include "health/_bg_slideshow.html" %}
+        {% include "health/_decor.html" %}
+        <h1>Établissements de santé</h1>
+        <p>Liste complète, avec recherche et filtres.</p>
+    </div>
+
+    <div class="table-toolbar">
+
+        <input
+            type="text"
+            id="search-etab"
+            placeholder="Rechercher par nom ou adresse..."
+        >
+
+        <select id="filter-type">
+            <option value="">Tous les types</option>
+        </select>
+
+        <button id="btn-filtrer-etab">Filtrer</button>
+
+        <a id="btn-export" href="/api/export/etablissements/" class="btn-secondary" download>
+            Exporter (GeoJSON)
+        </a>
+
+    </div>
+
+    <div class="table-wrapper">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Nom</th>
+                    <th>Type</th>
+                    <th>Quartier</th>
+                    <th>Adresse</th>
+                    <th>Secteur</th>
+                    <th>Capacité</th>
+                </tr>
+            </thead>
+            <tbody id="etab-table-body">
+                <tr><td colspan="6" class="loading-row">Chargement des données...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <p id="etab-count" class="table-count"></p>
+
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'health/js/etablissements.js' %}?v=6"></script>
+{% endblock %}

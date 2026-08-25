@@ -1,0 +1,136 @@
+{% extends "health/base.html" %}
+{% load static %}
+
+{% block title %}
+Carte sanitaire
+{% endblock %}
+
+{% block content %}
+
+<div class="map-page">
+
+    <div class="map-header">
+        {% include "health/_bg_slideshow.html" %}
+        {% include "health/_decor.html" %}
+        <div>
+            <h1>Carte sanitaire</h1>
+            <p>
+                Explorez les établissements de santé,
+                les quartiers et les communes.
+            </p>
+        </div>
+    </div>
+
+    <div class="map-container">
+
+        <!-- PANNEAU DE CONTRÔLE -->
+        <aside class="map-sidebar">
+
+            <h2>Filtres</h2>
+
+            <label for="search">Rechercher</label>
+
+            <input
+                type="text"
+                id="search"
+                placeholder="Nom de l'établissement..."
+            >
+
+            <label for="type">Type d'établissement</label>
+
+            <select id="type">
+                <option value="">Tous les types</option>
+            </select>
+
+            <label for="secteur">Secteur</label>
+
+            <select id="secteur">
+                <option value="">Tous les secteurs</option>
+            </select>
+            <p class="hint" id="secteur-hint">Donnée secteur non encore renseignée par l'équipe base de données.</p>
+
+            <button id="btn-search">
+                Rechercher
+            </button>
+
+            <button id="btn-reset" class="btn-secondary">
+                Réinitialiser
+            </button>
+
+            <hr>
+
+            <h3>Couches</h3>
+
+            <label class="check">
+                <input type="checkbox" id="layer-etablissements" checked>
+                Établissements
+            </label>
+
+            <label class="check">
+                <input type="checkbox" id="layer-quartiers" checked>
+                Quartiers
+            </label>
+
+            <label class="check">
+                <input type="checkbox" id="layer-communes" checked>
+                Communes
+            </label>
+
+            <hr>
+
+            <h3>Légende</h3>
+            <div id="legend" class="legend"></div>
+
+            <hr>
+
+            <h3>Zone de desserte</h3>
+            <p class="hint">
+                1. Clique sur un marqueur établissement sur la carte.<br>
+                2. Dans sa fiche, clique sur le bouton
+                <strong>"Zone de desserte"</strong>.<br>
+                3. Choisis un mode et une durée ci-dessous.
+            </p>
+
+            <div id="zone-desserte-panel" class="zone-desserte-panel disabled">
+                <p id="zone-desserte-label">Aucun établissement sélectionné</p>
+
+                <div class="mode-buttons">
+                    <button type="button" class="mode-btn active" data-mode="pied" data-vitesse="83.3">
+                        <span class="mode-icon">🚶</span> À pied
+                    </button>
+                    <button type="button" class="mode-btn" data-mode="vehicule" data-vitesse="500">
+                        <span class="mode-icon">🚗</span> En véhicule
+                    </button>
+                </div>
+
+                <div class="radius-buttons">
+                    <button type="button" class="radius-btn" data-minutes="5">5 min</button>
+                    <button type="button" class="radius-btn" data-minutes="10">10 min</button>
+                    <button type="button" class="radius-btn" data-minutes="15">15 min</button>
+                </div>
+
+                <button type="button" id="btn-clear-zone" class="btn-secondary">
+                    Effacer la zone
+                </button>
+            </div>
+
+            <p class="hint disclaimer">
+                ⚠️ Zone estimée à partir d'une vitesse moyenne
+                (🚶 5 km/h, 🚗 30 km/h en ville) : un cercle
+                à vol d'oiseau, pas une isochrone de routage réelle.
+            </p>
+
+        </aside>
+
+        <!-- CARTE -->
+        <div id="map"></div>
+
+    </div>
+
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'health/js/carte.js' %}?v=6"></script>
+{% endblock %}

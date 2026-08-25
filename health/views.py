@@ -2,16 +2,33 @@ import json
 
 from django.http import JsonResponse
 
-from .models import EtablissementSante
+from .models import EtablissementSante, TypeEtablissement, Secteur
 
 
 from django.db.models import Q
 
 
-from django.core.paginator import Paginator
+def types_etablissements(request):
+    """Liste simple des types d'établissement (pour peupler un filtre).
+
+    Documenté dans docs/API.md mais absent du code reçu : ajouté ici pour
+    que le frontend n'ait pas à déduire les types uniquement depuis les
+    résultats déjà chargés (ce qui masque les types sans résultat courant).
+    """
+    types = list(
+        TypeEtablissement.objects.order_by("libelle_type")
+        .values("id_type", "libelle_type")
+    )
+    return JsonResponse({"types": types})
 
 
-def etablissements_geojson(request):
+def secteurs(request):
+    """Liste simple des secteurs (cf. docs/API.md — table actuellement vide)."""
+    data = list(Secteur.objects.order_by("libelle").values("id_secteur", "libelle"))
+    return JsonResponse({"secteurs": data})
+
+
+def _etablissements_queryset(request):
     etablissements = EtablissementSante.objects.select_related(
         "id_type", "id_quartier", "id_secteur"
     )
@@ -20,8 +37,6 @@ def etablissements_geojson(request):
     quartier_param = request.GET.get("quartier")
     secteur_param = request.GET.get("secteur")
     search_param = request.GET.get("search")
-    page_param = request.GET.get("page")
-    page_size_param = request.GET.get("page_size", 20)
 
     if type_param:
         etablissements = etablissements.filter(id_type__libelle_type__icontains=type_param)
@@ -37,31 +52,10 @@ def etablissements_geojson(request):
             Q(nom__icontains=search_param) | Q(adresse__icontains=search_param)
         )
 
-    pagination_info = None
-    if page_param:
-        try:
-            page_size = int(page_size_param)
-        except ValueError:
-            page_size = 20
+    return etablissements
 
-        paginator = Paginator(etablissements, page_size)
-        try:
-            page_number = int(page_param)
-        except ValueError:
-            page_number = 1
 
-        page_obj = paginator.get_page(page_number)
-        etablissements = page_obj.object_list
-
-        pagination_info = {
-            "page": page_obj.number,
-            "page_size": page_size,
-            "total_pages": paginator.num_pages,
-            "total_resultats": paginator.count,
-            "page_suivante": page_obj.has_next(),
-            "page_precedente": page_obj.has_previous(),
-        }
-
+def _etablissements_features(etablissements):
     features = []
     for e in etablissements:
         features.append({
@@ -77,25 +71,36 @@ def etablissements_geojson(request):
                 "secteur": e.id_secteur.libelle if e.id_secteur else None,
             },
         })
+    return features
 
-    response_data = {"type": "FeatureCollection", "features": features}
-    if pagination_info:
-        response_data["pagination"] = pagination_info
 
-    return JsonResponse(response_data)
+def etablissements_geojson(request):
+    etablissements = _etablissements_queryset(request)
+    features = _etablissements_features(etablissements)
+
+    return JsonResponse({
+        "type": "FeatureCollection",
+        "features": features,
+    })
+
+
+def export_etablissements(request):
+    """Identique à etablissements_geojson mais force le téléchargement."""
+    etablissements = _etablissements_queryset(request)
+    features = _etablissements_features(etablissements)
+
+    response = JsonResponse({
+        "type": "FeatureCollection",
+        "features": features,
+    })
+    response["Content-Disposition"] = 'attachment; filename="etablissements.geojson"'
+    return response
 
 from .models import EtablissementSante, Quartier, Commune
 
 
-from django.db.models import Count
-
-
 def quartiers_geojson(request):
-    quartiers = (
-        Quartier.objects
-        .select_related("id_commune")
-        .annotate(nb_etablissements=Count("etablissements"))
-    )
+    quartiers = Quartier.objects.select_related("id_commune")
 
     features = []
     for q in quartiers:
@@ -106,7 +111,7 @@ def quartiers_geojson(request):
                 "id": q.id_quartier,
                 "nom": q.nom,
                 "commune": q.id_commune.nom,
-                "nb_etablissements": q.nb_etablissements,
+                "nb_etablissements": q.etablissements.count(),
             },
         })
 
@@ -176,7 +181,8 @@ def etablissement_proche(request):
     return JsonResponse({"type": "FeatureCollection", "features": features})
 UTM_SRID = 32628  # UTM zone 28N, système métrique adapté à Dakar
 
-RAYONS_AUTORISES = [500, 1000, 2000]
+RAYON_MIN = 50
+RAYON_MAX = 8000
 
 
 def zone_desserte(request):
@@ -191,9 +197,9 @@ def zone_desserte(request):
     except (TypeError, ValueError):
         return JsonResponse({"error": "Paramètre 'rayon' requis (entier, en mètres)."}, status=400)
 
-    if rayon not in RAYONS_AUTORISES:
+    if not (RAYON_MIN <= rayon <= RAYON_MAX):
         return JsonResponse(
-            {"error": f"Rayon non autorisé. Valeurs possibles : {RAYONS_AUTORISES}."},
+            {"error": f"Rayon hors limites autorisées ({RAYON_MIN} à {RAYON_MAX} mètres)."},
             status=400,
         )
 
@@ -305,85 +311,99 @@ def accessibilite(request):
         ),
         "quartiers": resultats,
     })
-from .models import TypeEtablissement, Secteur
 
 
-def types_etablissements_json(request):
-    data = list(TypeEtablissement.objects.values("id_type", "libelle_type"))
-    return JsonResponse({"types": data})
+from django.shortcuts import render
+
+from django.db import connection, DatabaseError
 
 
-def secteurs_json(request):
-    data = list(Secteur.objects.values("id_secteur", "libelle"))
-    return JsonResponse({"secteurs": data})
+# ==========================================================
+# ROUTAGE RÉEL (pgRouting) — voir setup_routing.sql
+# ==========================================================
+# Ces vues consomment les tables troncon_route_clean /
+# troncon_route_vertices construites manuellement via
+# setup_routing.sql (hors migrations Django, cf. commentaire
+# en tête de ce script). Si ce script n'a pas encore été exécuté
+# sur la base de données utilisée, ces vues renvoient une erreur
+# 503 explicite plutôt qu'un 500 imprévisible.
 
-
-def export_etablissements(request):
-    response = etablissements_geojson(request)
-    response["Content-Disposition"] = 'attachment; filename="etablissements_export.geojson"'
-    return response
-
-from django.db import connection
-
-
-def _noeud_le_plus_proche(point_wkt):
-    """Trouve le nœud du graphe de routage le plus proche d'un point (WKT)."""
+def _table_routage_existe():
     with connection.cursor() as cursor:
         cursor.execute(
-            """
-            SELECT id FROM troncon_route_vertices
-            ORDER BY geom <-> ST_SetSRID(ST_GeomFromText(%s), 4326)
-            LIMIT 1
-            """,
-            [point_wkt],
+            "SELECT to_regclass('public.troncon_route_clean'), "
+            "to_regclass('public.troncon_route_vertices')"
         )
-        row = cursor.fetchone()
-        return row[0] if row else None
+        clean, vertices = cursor.fetchone()
+        return clean is not None and vertices is not None
 
 
-def _calculer_itineraire(noeud_depart, noeud_arrivee):
-    """Exécute pgr_dijkstra et renvoie (liste_geometries_ordonnee, distance_totale_m) ou (None, None)."""
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            SELECT dj.seq, dj.agg_cost, t.geom
-            FROM pgr_dijkstra(
-                'SELECT id, source, target, cost FROM troncon_route_clean',
-                %s, %s, directed => false
-            ) AS dj
-            LEFT JOIN troncon_route_clean t ON t.id = dj.edge
-            ORDER BY dj.seq
-            """,
-            [noeud_depart, noeud_arrivee],
-        )
-        rows = cursor.fetchall()
+def _plus_proche_noeud(cursor, lon, lat):
+    """Retourne l'id du nœud du réseau routier le plus proche d'un point."""
+    cursor.execute(
+        """
+        SELECT id
+        FROM troncon_route_vertices
+        ORDER BY geom <-> ST_SetSRID(ST_MakePoint(%s, %s), 4326)
+        LIMIT 1
+        """,
+        [lon, lat],
+    )
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+
+def _calculer_itineraire(cursor, noeud_depart, noeud_arrivee):
+    """Exécute pgr_dijkstra et reconstruit la géométrie du trajet.
+
+    Retourne (geojson_line, distance_m) ou (None, None) si aucun chemin
+    n'existe entre les deux nœuds (îlots non connectés — cf. setup_routing.sql).
+    """
+    cursor.execute(
+        """
+        SELECT dij.edge, dij.agg_cost, e.geom
+        FROM pgr_dijkstra(
+            'SELECT id, source, target, cost FROM troncon_route_clean',
+            %s, %s,
+            directed => false
+        ) AS dij
+        JOIN troncon_route_clean AS e ON e.id = dij.edge
+        ORDER BY dij.path_seq
+        """,
+        [noeud_depart, noeud_arrivee],
+    )
+    rows = cursor.fetchall()
 
     if not rows:
         return None, None
 
     distance_totale = rows[-1][1]
-    geometries = [GEOSGeometry(geom_wkb) for _, _, geom_wkb in rows if geom_wkb is not None]
-    return geometries, distance_totale
 
+    segment_ids = [str(r[0]) for r in rows]
+    cursor.execute(
+        f"""
+        SELECT ST_AsGeoJSON(ST_LineMerge(ST_Union(geom)))
+        FROM troncon_route_clean
+        WHERE id IN ({','.join(segment_ids)})
+        """
+    )
+    geojson_str = cursor.fetchone()[0]
 
-def _reponse_itineraire(geometries, distance_totale, properties_extra):
-    from django.contrib.gis.geos import MultiLineString
-
-    trace = MultiLineString(geometries)
-    return JsonResponse({
-        "type": "FeatureCollection",
-        "features": [{
-            "type": "Feature",
-            "geometry": json.loads(trace.geojson),
-            "properties": {
-                "distance_m": round(distance_totale, 1),
-                **properties_extra,
-            },
-        }],
-    })
+    return json.loads(geojson_str), distance_totale
 
 
 def itineraire_etablissements(request):
+    """GET /api/itineraire/etablissements/?id1=&id2=
+
+    Calcule le plus court chemin réel (réseau routier) entre deux
+    établissements de santé, via pgRouting.
+    """
+    if not _table_routage_existe():
+        return JsonResponse(
+            {"error": "Le réseau de routage n'est pas encore configuré (voir setup_routing.sql)."},
+            status=503,
+        )
+
     id1 = request.GET.get("id1")
     id2 = request.GET.get("id2")
 
@@ -396,21 +416,45 @@ def itineraire_etablissements(request):
     except EtablissementSante.DoesNotExist:
         return JsonResponse({"error": "Établissement introuvable."}, status=404)
 
-    noeud1 = _noeud_le_plus_proche(e1.geom.wkt)
-    noeud2 = _noeud_le_plus_proche(e2.geom.wkt)
+    with connection.cursor() as cursor:
+        noeud1 = _plus_proche_noeud(cursor, e1.geom.x, e1.geom.y)
+        noeud2 = _plus_proche_noeud(cursor, e2.geom.x, e2.geom.y)
 
-    geometries, distance = _calculer_itineraire(noeud1, noeud2)
-    if geometries is None:
-        return JsonResponse({
-            "error": "Aucun itinéraire trouvé entre ces deux établissements (routes non connectées dans les données)."
-        }, status=404)
+        if noeud1 is None or noeud2 is None:
+            return JsonResponse({"error": "Réseau routier vide."}, status=503)
 
-    return _reponse_itineraire(geometries, distance, {
-        "depart": e1.nom, "arrivee": e2.nom,
+        geometry, distance_m = _calculer_itineraire(cursor, noeud1, noeud2)
+
+    if geometry is None:
+        return JsonResponse(
+            {"error": "Aucun itinéraire trouvé (les deux établissements sont probablement "
+                      "dans des îlots du réseau non connectés entre eux)."},
+            status=404,
+        )
+
+    return JsonResponse({
+        "type": "Feature",
+        "geometry": geometry,
+        "properties": {
+            "depart": e1.nom,
+            "arrivee": e2.nom,
+            "distance_m": round(distance_m, 1),
+        },
     })
 
-from django.contrib.gis.geos import GEOSGeometry, Point, MultiLineString
-def itineraire_depuis_position(request):
+
+def itineraire_point(request):
+    """GET /api/itineraire/?lat=&lon=&id=
+
+    Calcule le plus court chemin réel entre un point quelconque
+    (ex : position de l'utilisateur) et un établissement de santé.
+    """
+    if not _table_routage_existe():
+        return JsonResponse(
+            {"error": "Le réseau de routage n'est pas encore configuré (voir setup_routing.sql)."},
+            status=503,
+        )
+
     lat = request.GET.get("lat")
     lon = request.GET.get("lon")
     etablissement_id = request.GET.get("id")
@@ -429,16 +473,140 @@ def itineraire_depuis_position(request):
     except EtablissementSante.DoesNotExist:
         return JsonResponse({"error": "Établissement introuvable."}, status=404)
 
-    position = Point(lon, lat, srid=4326)
-    noeud_depart = _noeud_le_plus_proche(position.wkt)
-    noeud_arrivee = _noeud_le_plus_proche(etablissement.geom.wkt)
+    with connection.cursor() as cursor:
+        noeud_depart = _plus_proche_noeud(cursor, lon, lat)
+        noeud_arrivee = _plus_proche_noeud(cursor, etablissement.geom.x, etablissement.geom.y)
 
-    geometries, distance = _calculer_itineraire(noeud_depart, noeud_arrivee)
-    if geometries is None:
-        return JsonResponse({
-            "error": "Aucun itinéraire trouvé vers cet établissement (routes non connectées dans les données)."
-        }, status=404)
+        if noeud_depart is None or noeud_arrivee is None:
+            return JsonResponse({"error": "Réseau routier vide."}, status=503)
 
-    return _reponse_itineraire(geometries, distance, {
-        "arrivee": etablissement.nom,
+        geometry, distance_m = _calculer_itineraire(cursor, noeud_depart, noeud_arrivee)
+
+    if geometry is None:
+        return JsonResponse(
+            {"error": "Aucun itinéraire trouvé (point probablement hors du réseau connecté)."},
+            status=404,
+        )
+
+    return JsonResponse({
+        "type": "Feature",
+        "geometry": geometry,
+        "properties": {
+            "arrivee": etablissement.nom,
+            "distance_m": round(distance_m, 1),
+        },
     })
+
+
+VITESSES_M_PAR_MIN = {
+    "pied": 83.3,      # ≈ 5 km/h
+    "vehicule": 500.0,  # ≈ 30 km/h en ville
+}
+
+
+def zone_desserte_reseau(request):
+    """GET /api/zone-desserte-reseau/?id=&minutes=&mode=pied|vehicule
+
+    Vraie isochrone basée sur le réseau routier réel (pgr_drivingDistance),
+    par opposition à /api/zone-desserte/ qui trace un simple cercle à vol
+    d'oiseau. Retourne l'enveloppe convexe des nœuds atteignables dans le
+    temps imparti — une approximation nettement plus réaliste qu'un cercle,
+    mais qui reste une enveloppe (pas le détail de chaque rue accessible).
+    """
+    if not _table_routage_existe():
+        return JsonResponse(
+            {"error": "Le réseau de routage n'est pas encore configuré (voir setup_routing.sql)."},
+            status=503,
+        )
+
+    etablissement_id = request.GET.get("id")
+    minutes = request.GET.get("minutes")
+    mode = request.GET.get("mode", "pied")
+
+    if not etablissement_id or not minutes:
+        return JsonResponse({"error": "Paramètres 'id' et 'minutes' requis."}, status=400)
+
+    if mode not in VITESSES_M_PAR_MIN:
+        return JsonResponse({"error": "Paramètre 'mode' doit être 'pied' ou 'vehicule'."}, status=400)
+
+    try:
+        minutes = float(minutes)
+    except ValueError:
+        return JsonResponse({"error": "'minutes' doit être un nombre."}, status=400)
+
+    try:
+        etablissement = EtablissementSante.objects.get(id_etablissement=etablissement_id)
+    except EtablissementSante.DoesNotExist:
+        return JsonResponse({"error": "Établissement introuvable."}, status=404)
+
+    cout_limite = minutes * 60 * (VITESSES_M_PAR_MIN[mode] / 60)  # = minutes * vitesse_m/min
+
+    with connection.cursor() as cursor:
+        noeud_depart = _plus_proche_noeud(cursor, etablissement.geom.x, etablissement.geom.y)
+
+        if noeud_depart is None:
+            return JsonResponse({"error": "Réseau routier vide."}, status=503)
+
+        cursor.execute(
+            """
+            SELECT v.geom
+            FROM pgr_drivingDistance(
+                'SELECT id, source, target, cost FROM troncon_route_clean',
+                %s, %s,
+                directed => false
+            ) AS dd
+            JOIN troncon_route_vertices AS v ON v.id = dd.node
+            """,
+            [noeud_depart, cout_limite],
+        )
+        points = cursor.fetchall()
+
+        if len(points) < 3:
+            return JsonResponse(
+                {"error": "Réseau routier insuffisant autour de cet établissement pour "
+                          "calculer une zone (moins de 3 nœuds atteignables)."},
+                status=404,
+            )
+
+        ids_str = ",".join(str(i) for i in range(len(points)))
+        cursor.execute(
+            """
+            SELECT ST_AsGeoJSON(ST_ConvexHull(ST_Collect(v.geom)))
+            FROM pgr_drivingDistance(
+                'SELECT id, source, target, cost FROM troncon_route_clean',
+                %s, %s,
+                directed => false
+            ) AS dd
+            JOIN troncon_route_vertices AS v ON v.id = dd.node
+            """,
+            [noeud_depart, cout_limite],
+        )
+        geojson_str = cursor.fetchone()[0]
+
+    return JsonResponse({
+        "type": "Feature",
+        "geometry": json.loads(geojson_str),
+        "properties": {
+            "etablissement_id": etablissement.id_etablissement,
+            "nom": etablissement.nom,
+            "mode": mode,
+            "minutes": minutes,
+            "reseau_reel": True,
+        },
+    })
+
+
+def accueil(request):
+    return render(request, "health/accueil.html")
+
+def carte(request):
+    return render(request, "health/carte.html")
+
+def etablissements_page(request):
+    return render(request, "health/etablissements.html")
+
+def quartiers_page(request):
+    return render(request, "health/quartiers.html")
+
+def statistiques_page(request):
+    return render(request, "health/statistiques.html")

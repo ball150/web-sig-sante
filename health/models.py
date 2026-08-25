@@ -103,14 +103,3 @@ class Population(models.Model):
 
     def __str__(self):
         return f"{self.id_quartier.nom} — {self.effectif} hab."
-class TronconRoute(models.Model):
-    """Table technique dédiée au routage (pgRouting), séparée du MPD académique.
-    'source' et 'target' seront remplis automatiquement par pgr_createTopology, pas par nous."""
-    id = models.AutoField(primary_key=True)
-    geom = gis_models.LineStringField(srid=4326)
-    source = models.IntegerField(null=True, blank=True)
-    target = models.IntegerField(null=True, blank=True)
-    cost = models.FloatField(null=True, blank=True)
-
-    class Meta:
-        db_table = "troncon_route"
