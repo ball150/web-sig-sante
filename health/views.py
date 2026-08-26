@@ -180,6 +180,8 @@ def etablissement_proche(request):
         })
 
     return JsonResponse({"type": "FeatureCollection", "features": features})
+
+
 UTM_SRID = 32628  # UTM zone 28N, système métrique adapté à Dakar
 
 RAYON_MIN = 50
@@ -227,6 +229,8 @@ def zone_desserte(request):
     }
 
     return JsonResponse({"type": "FeatureCollection", "features": [feature]})
+
+
 from django.db.models import Count, Sum
 
 from .models import Population
@@ -281,6 +285,8 @@ def statistiques(request):
             "feminine": population_data["feminine"] or 0,
         },
     })
+
+
 def accessibilite(request):
     quartiers = Quartier.objects.select_related("id_commune")
 
@@ -495,8 +501,9 @@ def itineraire_point(request):
         },
     })
 
+
 VITESSES_M_PAR_MIN = {
-    "pied": 83.3,      # ≈ 5 km/h
+    "pied": 83.3,       # ≈ 5 km/h
     "vehicule": 500.0,  # ≈ 30 km/h en ville
 }
 
@@ -565,7 +572,6 @@ def zone_desserte_reseau(request):
                 status=404,
             )
 
-        ids_str = ",".join(str(i) for i in range(len(points)))
         cursor.execute(
             """
             SELECT ST_AsGeoJSON(ST_ConvexHull(ST_Collect(v.geom)))
@@ -596,14 +602,18 @@ def zone_desserte_reseau(request):
 def accueil(request):
     return render(request, "health/accueil.html")
 
+
 def carte(request):
     return render(request, "health/carte.html")
+
 
 def etablissements_page(request):
     return render(request, "health/etablissements.html")
 
+
 def quartiers_page(request):
     return render(request, "health/quartiers.html")
+
 
 def statistiques_page(request):
     return render(request, "health/statistiques.html")
