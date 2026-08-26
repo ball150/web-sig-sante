@@ -32,7 +32,7 @@ def secteurs(request):
 def _etablissements_queryset(request):
     etablissements = EtablissementSante.objects.select_related(
         "id_type", "id_quartier", "id_secteur"
-    )
+    ).order_by("id_etablissement")
 
     type_param = request.GET.get("type")
     quartier_param = request.GET.get("quartier")
@@ -75,10 +75,44 @@ def _etablissements_features(etablissements):
     return features
 
 
+from django.core.paginator import Paginator
+
+
 def etablissements_geojson(request):
     etablissements = _etablissements_queryset(request)
-    features = _etablissements_features(etablissements)
 
+    page_param = request.GET.get("page")
+
+    if page_param:
+        page_size = request.GET.get("page_size", 20)
+        try:
+            page_size = int(page_size)
+        except ValueError:
+            page_size = 20
+
+        paginator = Paginator(etablissements, page_size)
+
+        try:
+            page_number = int(page_param)
+        except ValueError:
+            page_number = 1
+
+        page_obj = paginator.get_page(page_number)
+        features = _etablissements_features(page_obj.object_list)
+
+        return JsonResponse({
+            "type": "FeatureCollection",
+            "features": features,
+            "pagination": {
+                "page_courante": page_obj.number,
+                "total_pages": paginator.num_pages,
+                "total_resultats": paginator.count,
+                "page_suivante": page_obj.has_next(),
+                "page_precedente": page_obj.has_previous(),
+            },
+        })
+
+    features = _etablissements_features(etablissements)
     return JsonResponse({
         "type": "FeatureCollection",
         "features": features,
