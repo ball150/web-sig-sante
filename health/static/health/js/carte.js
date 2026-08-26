@@ -185,6 +185,10 @@
                             <button class="popup-btn popup-btn-secondary" data-itineraire-id="${props.id}" data-itineraire-nom="${props.nom}">
                                 📍 Itinéraire depuis ma position
                             </button>
+
+                            <button class="popup-btn popup-btn-secondary" data-route2-id="${props.id}" data-route2-nom="${props.nom}">
+                                🧭 Itinéraire vers un autre établissement
+                            </button>
                         </div>
                     `);
 
@@ -202,6 +206,14 @@
                         if (btnItineraire) {
                             btnItineraire.addEventListener("click", function () {
                                 calculerItineraireDepuisMaPosition(props.id, props.nom);
+                            });
+                        }
+
+                        const btnRoute2 = e.popup.getElement().querySelector("[data-route2-id]");
+
+                        if (btnRoute2) {
+                            btnRoute2.addEventListener("click", function () {
+                                gererClicItineraire2(props.id, props.nom);
                             });
                         }
                     });
@@ -588,8 +600,16 @@
 
 
     // ==========================================
-    // ITINÉRAIRE RÉEL depuis ma position
+    // ITINÉRAIRE À VOL D'OISEAU depuis ma position
     // ==========================================
+    // Volontairement PAS basé sur le réseau routier réel : la position de
+    // l'utilisateur peut se trouver n'importe où (potentiellement hors de la
+    // commune de Parcelles Assainies, seule zone couverte par les données
+    // routières). Un calcul de plus court chemin sur un réseau aussi limité
+    // "accrocherait" la position au nœud du graphe le plus proche même très
+    // éloigné, donnant un trajet trompeur. Voir /api/itineraire/etablissements/
+    // ci-dessous pour le vrai routage, utilisé lui entre deux établissements
+    // (toujours à l'intérieur de la zone couverte).
 
     let itineraireLayer = L.layerGroup().addTo(map);
 
@@ -618,13 +638,13 @@
                         itineraireLayer.clearLayers();
 
                         L.geoJSON(data, {
-                            style: { color: "#e63946", weight: 4, opacity: 0.85 }
+                            style: { color: "#e63946", weight: 3, opacity: 0.85, dashArray: "8 6" }
                         }).addTo(itineraireLayer);
 
                         map.fitBounds(L.geoJSON(data).getBounds(), { padding: [40, 40] });
 
                         const distanceKm = (data.properties.distance_m / 1000).toFixed(2);
-                        alert(`Itinéraire vers ${etablissementNom} : ${distanceKm} km (réseau routier réel).`);
+                        alert(`Distance vers ${etablissementNom} : ${distanceKm} km à vol d'oiseau.`);
                     })
                     .catch(error => {
                         alert("Itinéraire indisponible : " + error.message);
@@ -635,6 +655,74 @@
             }
         );
     }
+
+
+    // ==========================================
+    // ITINÉRAIRE RÉEL entre 2 établissements (réseau routier / pgRouting)
+    // ==========================================
+
+    let itineraire2Layer = L.layerGroup().addTo(map);
+    let etablissementDepart = null; // { id, nom }
+
+    function gererClicItineraire2(id, nom) {
+
+        if (!etablissementDepart) {
+            etablissementDepart = { id, nom };
+
+            document.getElementById("itineraire2-panel").classList.remove("disabled");
+            document.getElementById("itineraire2-label").textContent =
+                `Départ : ${nom} — clique sur un autre établissement pour définir l'arrivée.`;
+            return;
+        }
+
+        if (String(etablissementDepart.id) === String(id)) {
+            alert("Choisis un établissement différent pour l'arrivée.");
+            return;
+        }
+
+        const departNom = etablissementDepart.nom;
+        const departId = etablissementDepart.id;
+
+        document.getElementById("itineraire2-label").textContent =
+            `${departNom} → ${nom} — calcul en cours...`;
+
+        fetch(`/api/itineraire/etablissements/?id1=${departId}&id2=${id}`)
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.error || "Erreur itinéraire"); });
+                }
+                return response.json();
+            })
+            .then(data => {
+
+                itineraire2Layer.clearLayers();
+
+                L.geoJSON(data, {
+                    style: { color: "#1d3557", weight: 4, opacity: 0.85 }
+                }).addTo(itineraire2Layer);
+
+                map.fitBounds(L.geoJSON(data).getBounds(), { padding: [40, 40] });
+
+                const distanceKm = (data.properties.distance_m / 1000).toFixed(2);
+                document.getElementById("itineraire2-label").textContent =
+                    `${departNom} → ${nom} : ${distanceKm} km (réseau routier réel).`;
+            })
+            .catch(error => {
+                document.getElementById("itineraire2-label").textContent =
+                    "Itinéraire indisponible : " + error.message;
+            })
+            .finally(() => {
+                etablissementDepart = null;
+            });
+    }
+
+    document.getElementById("btn-clear-itineraire2").addEventListener("click", function () {
+        itineraire2Layer.clearLayers();
+        etablissementDepart = null;
+
+        document.getElementById("itineraire2-panel").classList.add("disabled");
+        document.getElementById("itineraire2-label").textContent = "Aucun départ défini";
+    });
 
 
     // ==========================================

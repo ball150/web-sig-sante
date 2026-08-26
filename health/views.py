@@ -3,7 +3,8 @@ import json
 from django.http import JsonResponse
 
 from .models import EtablissementSante, TypeEtablissement, Secteur
-
+from django.contrib.gis.geos import Point, LineString
+from django.contrib.gis.db.models.functions import Distance
 
 from django.db.models import Q
 
@@ -31,7 +32,7 @@ def secteurs(request):
 def _etablissements_queryset(request):
     etablissements = EtablissementSante.objects.select_related(
         "id_type", "id_quartier", "id_secteur"
-    )
+    ).order_by("id_etablissement")
 
     type_param = request.GET.get("type")
     quartier_param = request.GET.get("quartier")
@@ -74,10 +75,44 @@ def _etablissements_features(etablissements):
     return features
 
 
+from django.core.paginator import Paginator
+
+
 def etablissements_geojson(request):
     etablissements = _etablissements_queryset(request)
-    features = _etablissements_features(etablissements)
 
+    page_param = request.GET.get("page")
+
+    if page_param:
+        page_size = request.GET.get("page_size", 20)
+        try:
+            page_size = int(page_size)
+        except ValueError:
+            page_size = 20
+
+        paginator = Paginator(etablissements, page_size)
+
+        try:
+            page_number = int(page_param)
+        except ValueError:
+            page_number = 1
+
+        page_obj = paginator.get_page(page_number)
+        features = _etablissements_features(page_obj.object_list)
+
+        return JsonResponse({
+            "type": "FeatureCollection",
+            "features": features,
+            "pagination": {
+                "page_courante": page_obj.number,
+                "total_pages": paginator.num_pages,
+                "total_resultats": paginator.count,
+                "page_suivante": page_obj.has_next(),
+                "page_precedente": page_obj.has_previous(),
+            },
+        })
+
+    features = _etablissements_features(etablissements)
     return JsonResponse({
         "type": "FeatureCollection",
         "features": features,
@@ -179,6 +214,8 @@ def etablissement_proche(request):
         })
 
     return JsonResponse({"type": "FeatureCollection", "features": features})
+
+
 UTM_SRID = 32628  # UTM zone 28N, système métrique adapté à Dakar
 
 RAYON_MIN = 50
@@ -226,6 +263,8 @@ def zone_desserte(request):
     }
 
     return JsonResponse({"type": "FeatureCollection", "features": [feature]})
+
+
 from django.db.models import Count, Sum
 
 from .models import Population
@@ -280,6 +319,8 @@ def statistiques(request):
             "feminine": population_data["feminine"] or 0,
         },
     })
+
+
 def accessibilite(request):
     quartiers = Quartier.objects.select_related("id_commune")
 
@@ -446,15 +487,15 @@ def itineraire_etablissements(request):
 def itineraire_point(request):
     """GET /api/itineraire/?lat=&lon=&id=
 
-    Calcule le plus court chemin réel entre un point quelconque
-    (ex : position de l'utilisateur) et un établissement de santé.
+    Distance et trajet à vol d'oiseau entre une position (ex: position GPS de
+    l'utilisateur) et un établissement de santé. Volontairement PAS basé sur
+    pgRouting : contrairement à /api/itineraire/etablissements/ (toujours entre
+    deux établissements, donc toujours à l'intérieur de la zone couverte par
+    route_parcelle.shp), la position de l'utilisateur peut se trouver n'importe
+    où — un calcul de plus court chemin sur un réseau limité à une seule commune
+    donnerait alors un résultat trompeur (l'algorithme "accroche" la position au
+    nœud du graphe le plus proche, même très éloigné de la position réelle).
     """
-    if not _table_routage_existe():
-        return JsonResponse(
-            {"error": "Le réseau de routage n'est pas encore configuré (voir setup_routing.sql)."},
-            status=503,
-        )
-
     lat = request.GET.get("lat")
     lon = request.GET.get("lon")
     etablissement_id = request.GET.get("id")
@@ -473,33 +514,30 @@ def itineraire_point(request):
     except EtablissementSante.DoesNotExist:
         return JsonResponse({"error": "Établissement introuvable."}, status=404)
 
-    with connection.cursor() as cursor:
-        noeud_depart = _plus_proche_noeud(cursor, lon, lat)
-        noeud_arrivee = _plus_proche_noeud(cursor, etablissement.geom.x, etablissement.geom.y)
+    position = Point(lon, lat, srid=4326)
 
-        if noeud_depart is None or noeud_arrivee is None:
-            return JsonResponse({"error": "Réseau routier vide."}, status=503)
+    resultat = (
+        EtablissementSante.objects
+        .filter(id_etablissement=etablissement_id)
+        .annotate(distance=Distance("geom", position))
+        .first()
+    )
 
-        geometry, distance_m = _calculer_itineraire(cursor, noeud_depart, noeud_arrivee)
-
-    if geometry is None:
-        return JsonResponse(
-            {"error": "Aucun itinéraire trouvé (point probablement hors du réseau connecté)."},
-            status=404,
-        )
+    trajet = LineString(position, etablissement.geom, srid=4326)
 
     return JsonResponse({
         "type": "Feature",
-        "geometry": geometry,
+        "geometry": json.loads(trajet.geojson),
         "properties": {
             "arrivee": etablissement.nom,
-            "distance_m": round(distance_m, 1),
+            "distance_m": round(resultat.distance.m, 1),
+            "mode": "vol_oiseau",
         },
     })
 
 
 VITESSES_M_PAR_MIN = {
-    "pied": 83.3,      # ≈ 5 km/h
+    "pied": 83.3,       # ≈ 5 km/h
     "vehicule": 500.0,  # ≈ 30 km/h en ville
 }
 
@@ -568,7 +606,6 @@ def zone_desserte_reseau(request):
                 status=404,
             )
 
-        ids_str = ",".join(str(i) for i in range(len(points)))
         cursor.execute(
             """
             SELECT ST_AsGeoJSON(ST_ConvexHull(ST_Collect(v.geom)))
@@ -599,14 +636,18 @@ def zone_desserte_reseau(request):
 def accueil(request):
     return render(request, "health/accueil.html")
 
+
 def carte(request):
     return render(request, "health/carte.html")
+
 
 def etablissements_page(request):
     return render(request, "health/etablissements.html")
 
+
 def quartiers_page(request):
     return render(request, "health/quartiers.html")
+
 
 def statistiques_page(request):
     return render(request, "health/statistiques.html")
