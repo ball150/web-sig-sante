@@ -1,0 +1,71 @@
+{% extends "health/base.html" %}
+{% load static %}
+
+{% block title %}
+Statistiques - Carte Sanitaire
+{% endblock %}
+
+{% block content %}
+
+<div class="page-container">
+
+    <div class="page-header">
+        {% include "health/_bg_slideshow.html" %}
+        {% include "health/_decor.html" %}
+        <h1>Statistiques sanitaires</h1>
+        <p>Vue d'ensemble de l'offre de soins de la commune.</p>
+    </div>
+
+    <div class="stats-cards" id="stats-cards">
+        <!-- Rempli par JS -->
+    </div>
+
+    <div class="charts-grid">
+
+        <div class="chart-card">
+            <h3>Répartition par type d'établissement</h3>
+            <div class="chart-canvas-wrap">
+                <canvas id="chart-type"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-card">
+            <h3>Répartition par secteur</h3>
+            <div class="chart-canvas-wrap">
+                <canvas id="chart-secteur"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-card">
+            <h3>Population par sexe</h3>
+            <div class="chart-canvas-wrap" id="wrap-population">
+                <canvas id="chart-population"></canvas>
+            </div>
+            <p class="hint" id="population-hint">Donnée population non disponible.</p>
+        </div>
+
+        <div class="chart-card chart-card-wide">
+            <h3>Établissements par quartier</h3>
+            <div class="chart-canvas-wrap chart-canvas-wrap-tall">
+                <canvas id="chart-quartier"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-card chart-card-wide">
+            <h3>Habitants par établissement (accessibilité par quartier)</h3>
+            <div class="chart-canvas-wrap chart-canvas-wrap-tall">
+                <canvas id="chart-accessibilite"></canvas>
+            </div>
+            <p class="hint" id="accessibilite-hint"></p>
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="{% static 'health/js/statistiques.js' %}?v=6"></script>
+{% endblock %}
